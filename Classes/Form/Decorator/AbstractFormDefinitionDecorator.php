@@ -31,6 +31,7 @@ abstract class AbstractFormDefinitionDecorator implements DefinitionDecoratorInt
         'SingleSelect' => 'select',
         'FileUpload' => 'file',
         'Checkbox' => 'checkbox',
+        'MultiCheckbox' => 'checkbox',
         'RadioButton' => 'radio'
     ];
 
