@@ -18,6 +18,28 @@ use function in_array;
 
 abstract class AbstractFormDefinitionDecorator implements DefinitionDecoratorInterface
 {
+    var $TYPES = [
+        'StaticText' => 'staticText',
+        'Text' => 'text',
+        'Textarea' => 'textarea',
+        'Password' => 'password',
+        'Email' => 'email',
+        'Telephone' => 'tel',
+        'Url' => 'url',
+        'Number' => 'number',
+        'Date' => 'date',
+        'SingleSelect' => 'select',
+        'FileUpload' => 'file',
+        'Checkbox' => 'checkbox',
+        'RadioButton' => 'radio'
+    ];
+
+    var $VALIDATIONS = [
+        'EmailAddress' => 'email',
+        'NotEmpty' => 'required',
+        'Number' => 'number'
+    ];
+
     /**
      * @var array<string, mixed>
      */
@@ -36,30 +58,37 @@ abstract class AbstractFormDefinitionDecorator implements DefinitionDecoratorInt
     {
         $decorated = [];
 
-        $pageElements = $definition['renderables'][$currentPage]['renderables'] ?? [];
+        $elements = $definition['renderables'] ?? [];
+        $formId = $definition['identifier'];
 
-        $decorated['id'] = $definition['identifier'];
+        $decorated['id'] = $formId;
         $decorated['api'] = $this->formStatus;
         $decorated['i18n'] = $definition['i18n']['properties'] ?? [];
-        $decorated['elements'] = $this->handleRenderables($pageElements);
+        $decorated['renderingOptions'] = $definition['renderingOptions'];
+        $decorated['elements'] = $this->handleRenderables($elements, $formId);
 
         return $this->overrideDefinition($decorated, $definition, $currentPage);
     }
 
     /**
      * @param array<string, mixed> $renderables
+     * @param string $formId
      * @return array<string, mixed>
      */
-    protected function handleRenderables(array $renderables): array
+    protected function handleRenderables(array $renderables, string $formId): array
     {
         foreach ($renderables as &$element) {
-            if (in_array($element['type'], ['Fieldset', 'GridRow'], true) &&
+            if (
+                in_array($element['type'], ['Page', 'Fieldset', 'GridRow'], true) &&
                 is_array($element['renderables']) &&
-                count($element['renderables'])) {
-                $element['elements'] = $this->handleRenderables($element['renderables']);
+                count($element['renderables'])
+            ) {
+                $element['elements'] = $this->handleRenderables($element['renderables'], $formId);
                 unset($element['renderables']);
+                unset($element['defaultValue']);
+                unset($element['properties']);
             } else {
-                $element = $this->prepareElement($element);
+                $element = $this->prepareElement($element, $formId);
             }
         }
 
@@ -68,37 +97,81 @@ abstract class AbstractFormDefinitionDecorator implements DefinitionDecoratorInt
 
     /**
      * @param array<string, mixed> $element
+     * @param string $formId
      * @return array<string, mixed>
      */
-    protected function prepareElement(array $element): array
+    protected function prepareElement(array $element, string $formId): array
     {
-        $element['name'] = 'tx_form_formframework[' . $element['identifier'] . ']';
+
+        $element['name'] = 'tx_form_formframework[' . $formId . '][' . $element['identifier'] . ']';
 
         $element = $this->overrideElement($element);
 
-        if (isset($element['renderingOptions']['FEOverrideType'])) {
-            $element['type'] = $element['renderingOptions']['FEOverrideType'];
-            unset($element['renderingOptions']['FEOverrideType']);
+        if (isset($element['label'])) {
+            if ($element['label'] === "") {
+                unset($element['label']);
+            }
+        }
+
+        $element['id'] = $element['identifier'];
+        $element['validationName'] = $element['label'] ?? $element['identifier'];
+
+        if (isset($element['defaultValue'])) {
+            if ($element['defaultValue'] !== "") {
+                $element['value'] = $element['defaultValue'];
+            }
         }
 
         if (in_array($element['type'], ['ImageUpload', 'FileUpload'])) {
             unset($element['properties']['saveToFileMount']);
         }
 
-        if (!isset($element['validators'])) {
-            return $element;
-        }
+        $element['type'] = $this->TYPES[$element['type']] ?? 'hidden';
 
-        foreach ($element['validators'] as &$validator) {
-            if ($validator['identifier'] === 'RegularExpression') {
-                $jsRegex = $validator['FERegularExpression'] ?? null;
+        if (isset($element['properties'])) {
+            $prop = $element['properties'];
 
-                if ($jsRegex) {
-                    $validator['options']['regularExpression'] = $jsRegex;
-                    unset($validator['FERegularExpression']);
+            if (isset($prop['options'])) {
+                $element['options'] = $prop['options'];
+            }
+
+            if (isset($prop['elementDescription'])) {
+                if ($prop['elementDescription'] !== "") {
+                    $element['help'] = $prop['elementDescription'];
                 }
             }
+
+            if (isset($prop['fluidAdditionalAttributes']['placeholder'])) {
+                $element['placeholder'] = $prop['fluidAdditionalAttributes']['placeholder'];
+            } else if (isset($prop['prependOptionLabel'])) {
+                $element['placeholder'] = $prop['prependOptionLabel'];
+            }
+
+            if (isset($prop['allowedMimeTypes'])) {
+                if (!isset($element['validators'])) $element['validators'] = [];
+                $element['validators'][] = [
+                    'identifier' => 'mime:' + join(',', $prop['allowedMimeTypes'])
+                ];
+            }
+
+            unset($element['properties']);
         }
+
+        if (isset($element['validators'])) {
+            $element['validation'] = join(
+                '|',
+                array_map(
+                    function ($item) {
+                        return $this->VALIDATIONS[$item['identifier']] ?? $item['identifier'];
+                    },
+                    $element['validators']
+                )
+            );
+            unset($element['validators']);
+        }
+
+        unset($element['identifier']);
+        unset($element['defaultValue']);
 
         return $element;
     }
